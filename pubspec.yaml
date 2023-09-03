@@ -1,0 +1,21 @@
+name: igdb
+description: A starting point for Dart libraries or applications.
+version: 1.0.0
+# repository: https://github.com/my_org/my_repo
+publish_to: none
+
+environment:
+  sdk: ^3.1.0
+
+# Add regular dependencies here.
+dependencies:
+  dio: ^5.3.2
+  igdb_dart_protobuff:
+    git:
+      url: https://github.com/devsdocs/igdb_dart_protobuff.git
+  reusable_tools: ^1.0.8
+  # path: ^1.8.0
+
+dev_dependencies:
+  lints: ^2.0.0
+  test: ^1.21.0
