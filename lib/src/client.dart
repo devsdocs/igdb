@@ -1,12 +1,13 @@
 part of 'igdb_base.dart';
 
 class IGDBClient {
-  IGDBClient({
-    required this.clientId,
-    required this.clientSecret,
+  IGDBClient(
+    this._clientId,
+    this._clientSecret, {
+    this.useIsolateForRequest = false,
   });
-  final String clientId;
-  final String clientSecret;
+  final String _clientId;
+  final String _clientSecret;
 
   final _tokenEndpoint = 'id.twitch.tv';
 
@@ -14,6 +15,8 @@ class IGDBClient {
 
   String? _bearerToken;
   DateTime? _tokenExpiryDateTime;
+
+  bool useIsolateForRequest;
 
   Uri _apiUri(
     String unencodedPath, {
@@ -39,540 +42,1632 @@ class IGDBClient {
     } else {
       final fetch = await _fetchBearerToken();
       if (fetch == null) return false;
-      final mapper = fetch.toJsonObjectAsMap;
-      _bearerToken = mapper['access_token'] as String;
-      final secToExpire = mapper['expires_in'] as int;
+      _bearerToken = fetch['access_token'] as String;
+      final secToExpire = fetch['expires_in'] as int;
       _tokenExpiryDateTime = DateTime.now().add(Duration(seconds: secToExpire));
       return true;
     }
   }
 
-  Future<String?> _fetchBearerToken() async {
+  Future<Map<String, dynamic>?> _fetchBearerToken() async {
     final uri = _apiUri(
       'token',
       authority: _tokenEndpoint,
       pathPrefix: '/oauth2/',
       queryParameters: {
-        'client_id': clientId,
-        'client_secret': clientSecret,
+        'client_id': _clientId,
+        'client_secret': _clientSecret,
         'grant_type': 'client_credentials',
       },
     );
-    return _http.postUri(uri);
+    final data = await _http.postUri(uri);
+    return data as Map<String, dynamic>;
   }
 
-  Future<String?> _makeRequest(String path, String body) async {
+  Future<dynamic> _rawRequest(
+    String path,
+    String body, {
+    required bool isProto,
+  }) async {
+    final uri = _apiUri(path);
+
+    final headers = {
+      'Client-ID': _clientId,
+      HttpHeaders.authorizationHeader: 'Bearer $_bearerToken',
+      HttpHeaders.contentTypeHeader: Headers.formUrlEncodedContentType,
+    };
+
+    final options = NetworkTools.client.options
+      ..headers = headers
+      ..responseType = isProto ? ResponseType.bytes : ResponseType.json;
+
+    final post = await _http.postUri(
+      uri,
+      options: options,
+      nonMultipartFormData: body,
+      useIsolate: useIsolateForRequest,
+    );
+    return post;
+  }
+
+  Future<dynamic> _makeJsonRequest(
+    String path,
+    String body,
+  ) async {
     final isTokenValid = await _checkBearerToken();
     if (isTokenValid) {
-      final uri = _apiUri(path);
-
-      final headers = {
-        'Client-ID': clientId,
-        HttpHeaders.authorizationHeader: 'Bearer $_bearerToken',
-        HttpHeaders.contentTypeHeader: Headers.formUrlEncodedContentType,
-      };
-
-      final options = NetworkTools.client.options..headers = headers;
-
-      final post = await _http.postUri(
-        uri,
-        options: options,
-        nonMultipartFormData: body,
-      );
+      final post = await _rawRequest(path, body, isProto: false);
 
       return post;
     } else {
-      return null;
+      return _makeJsonRequest(path, body);
     }
   }
 
-  Future<String?> _makeRequestByEndpoint(
+  Future<Uint8List?> _makeProtoRequest(String path, String body) async {
+    final isTokenValid = await _checkBearerToken();
+    if (isTokenValid) {
+      final post = await _rawRequest(path, body, isProto: true);
+
+      return post as Uint8List?;
+    } else {
+      return _makeProtoRequest(path, body);
+    }
+  }
+
+  Future<Uint8List?> _makeCountProtoRequestByEndpoint(
     IGDBEndpoints endpoints,
     IGDBRequestParameters params,
   ) async =>
-      _makeRequest('$endpoints', '$params');
+      _makeProtoRequest('$endpoints/count.pb', '$params');
 
-  Future<AgeRating?> ageRatings(IGDBRequestParameters params) async {
+  Future<Uint8List?> _makeProtoRequestByEndpoint(
+    IGDBEndpoints endpoints,
+    IGDBRequestParameters params,
+  ) async =>
+      _makeProtoRequest('$endpoints.pb', '$params');
+
+  Future<dynamic> _makeCountJsonRequestByEndpoint(
+    IGDBEndpoints endpoints,
+    IGDBRequestParameters params,
+  ) async =>
+      _makeJsonRequest('$endpoints/count', '$params');
+
+  Future<dynamic> _makeJsonRequestByEndpoint(
+    IGDBEndpoints endpoints,
+    IGDBRequestParameters params,
+  ) async =>
+      _makeJsonRequest('$endpoints', '$params');
+
+  Future<AgeRating?> ageRatingProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.ageRatings;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return AgeRating.fromJson(fetch);
+      return AgeRating.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<AgeRatingContentDescription?> ageRatingContentDescriptions(
+  Future<Count?> ageRatingCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.ageRatings;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> ageRatingJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.ageRatings;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> ageRatingCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.ageRatings;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<AgeRatingContentDescription?> ageRatingContentDescriptionProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.ageRatingContentDescriptions;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return AgeRatingContentDescription.fromJson(fetch);
+      return AgeRatingContentDescription.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<AlternativeName?> alternativeNames(
+  Future<Count?> ageRatingContentDescriptionCountProto(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.ageRatingContentDescriptions;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> ageRatingContentDescriptionJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.ageRatingContentDescriptions;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> ageRatingContentDescriptionCountJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.ageRatingContentDescriptions;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<AlternativeName?> alternativeNameProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.alternativeNames;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return AlternativeName.fromJson(fetch);
+      return AlternativeName.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Artwork?> artworks(IGDBRequestParameters params) async {
+  Future<Count?> alternativeNameCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.alternativeNames;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> alternativeNameJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.alternativeNames;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> alternativeNameCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.alternativeNames;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Artwork?> artworkProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.artworks;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Artwork.fromJson(fetch);
+      return Artwork.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Character?> characters(IGDBRequestParameters params) async {
+  Future<Count?> artworkCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.artworks;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> artworkJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.artworks;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> artworkCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.artworks;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Character?> characterProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.characters;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Character.fromJson(fetch);
+      return Character.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<CharacterMugShot?> characterMugShots(
+  Future<Count?> characterCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.characters;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> characterJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.characters;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> characterCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.characters;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<CharacterMugShot?> characterMugShotProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.characterMugShots;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return CharacterMugShot.fromJson(fetch);
+      return CharacterMugShot.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Collection?> collections(IGDBRequestParameters params) async {
+  Future<Count?> characterMugShotCountProto(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.characterMugShots;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> characterMugShotJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.characterMugShots;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> characterMugShotCountJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.characterMugShots;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Collection?> collectionProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.collections;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Collection.fromJson(fetch);
+      return Collection.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Company?> companies(IGDBRequestParameters params) async {
+  Future<Count?> collectionCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.collections;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> collectionJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.collections;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> collectionCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.collections;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Company?> companyProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.companies;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Company.fromJson(fetch);
+      return Company.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<CompanyLogo?> companyLogos(IGDBRequestParameters params) async {
+  Future<Count?> companyCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.companies;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> companyJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.companies;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> companyCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.companies;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<CompanyLogo?> companyLogoProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.companyLogos;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return CompanyLogo.fromJson(fetch);
+      return CompanyLogo.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<CompanyWebsite?> companyWebsites(IGDBRequestParameters params) async {
+  Future<Count?> companyLogoCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.companyLogos;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> companyLogoJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.companyLogos;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> companyLogoCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.companyLogos;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<CompanyWebsite?> companyWebsiteProto(
+    IGDBRequestParameters params,
+  ) async {
     const endpoint = IGDBEndpoints.companyWebsites;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return CompanyWebsite.fromJson(fetch);
+      return CompanyWebsite.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Cover?> covers(IGDBRequestParameters params) async {
+  Future<Count?> companyWebsiteCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.companyWebsites;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> companyWebsiteJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.companyWebsites;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> companyWebsiteCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.companyWebsites;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Cover?> coverProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.covers;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Cover.fromJson(fetch);
+      return Cover.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<ExternalGame?> externalGames(IGDBRequestParameters params) async {
+  Future<Count?> coverCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.covers;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> coverJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.covers;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> coverCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.covers;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<ExternalGame?> externalGameProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.externalGames;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return ExternalGame.fromJson(fetch);
+      return ExternalGame.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Franchise?> franchises(IGDBRequestParameters params) async {
+  Future<Count?> externalGameCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.externalGames;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> externalGameJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.externalGames;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> externalGameCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.externalGames;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Franchise?> franchiseProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.franchises;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Franchise.fromJson(fetch);
+      return Franchise.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Game?> games(IGDBRequestParameters params) async {
+  Future<Count?> franchiseCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.franchises;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> franchiseJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.franchises;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> franchiseCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.franchises;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Game?> gameProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.games;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Game.fromJson(fetch);
+      return Game.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<GameEngine?> gameEngines(IGDBRequestParameters params) async {
+  Future<Count?> gameCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.games;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> gameJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.games;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> gameCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.games;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<GameEngine?> gameEngineProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.gameEngines;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return GameEngine.fromJson(fetch);
+      return GameEngine.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<GameEngineLogo?> gameEngineLogos(IGDBRequestParameters params) async {
+  Future<Count?> gameEngineCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameEngines;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> gameEngineJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameEngines;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> gameEngineCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameEngines;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<GameEngineLogo?> gameEngineLogoProto(
+    IGDBRequestParameters params,
+  ) async {
     const endpoint = IGDBEndpoints.gameEngineLogos;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return GameEngineLogo.fromJson(fetch);
+      return GameEngineLogo.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<GameLocalization?> gameLocalizations(
+  Future<Count?> gameEngineLogoCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameEngineLogos;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> gameEngineLogoJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameEngineLogos;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> gameEngineLogoCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameEngineLogos;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<GameLocalization?> gameLocalizationProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.gameLocalizations;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return GameLocalization.fromJson(fetch);
+      return GameLocalization.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<GameMode?> gameModes(IGDBRequestParameters params) async {
+  Future<Count?> gameLocalizationCountProto(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.gameLocalizations;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> gameLocalizationJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameLocalizations;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> gameLocalizationCountJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.gameLocalizations;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<GameMode?> gameModeProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.gameModes;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return GameMode.fromJson(fetch);
+      return GameMode.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<GameVersion?> gameVersions(IGDBRequestParameters params) async {
+  Future<Count?> gameModeCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameModes;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> gameModeJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameModes;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> gameModeCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameModes;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<GameVersion?> gameVersionProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.gameVersions;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return GameVersion.fromJson(fetch);
+      return GameVersion.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<GameVersionFeature?> gameVersionFeatures(
+  Future<Count?> gameVersionCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameVersions;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> gameVersionJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameVersions;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> gameVersionCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameVersions;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<GameVersionFeature?> gameVersionFeatureProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.gameVersionFeatures;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return GameVersionFeature.fromJson(fetch);
+      return GameVersionFeature.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<GameVersionFeatureValue?> gameVersionFeatureValues(
+  Future<Count?> gameVersionFeatureCountProto(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.gameVersionFeatures;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> gameVersionFeatureJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameVersionFeatures;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> gameVersionFeatureCountJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.gameVersionFeatures;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<GameVersionFeatureValue?> gameVersionFeatureValueProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.gameVersionFeatureValues;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return GameVersionFeatureValue.fromJson(fetch);
+      return GameVersionFeatureValue.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<GameVideo?> gameVideos(IGDBRequestParameters params) async {
+  Future<Count?> gameVersionFeatureValueCountProto(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.gameVersionFeatureValues;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> gameVersionFeatureValueJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.gameVersionFeatureValues;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> gameVersionFeatureValueCountJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.gameVersionFeatureValues;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<GameVideo?> gameVideoProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.gameVideos;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return GameVideo.fromJson(fetch);
+      return GameVideo.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Genre?> genres(IGDBRequestParameters params) async {
+  Future<Count?> gameVideoCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameVideos;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> gameVideoJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameVideos;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> gameVideoCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.gameVideos;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Genre?> genreProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.genres;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Genre.fromJson(fetch);
+      return Genre.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<InvolvedCompany?> involvedCompanies(
+  Future<Count?> genreCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.genres;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> genreJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.genres;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> genreCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.genres;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<InvolvedCompany?> involvedCompanyProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.involvedCompanies;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return InvolvedCompany.fromJson(fetch);
+      return InvolvedCompany.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Keyword?> keywords(IGDBRequestParameters params) async {
+  Future<Count?> involvedCompanyCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.involvedCompanies;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> involvedCompanyJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.involvedCompanies;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> involvedCompanyCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.involvedCompanies;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Keyword?> keywordProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.keywords;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Keyword.fromJson(fetch);
+      return Keyword.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<LanguageSupport?> languageSupports(
+  Future<Count?> keywordCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.keywords;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> keywordJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.keywords;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> keywordCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.keywords;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<LanguageSupport?> languageSupportProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.languageSupports;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return LanguageSupport.fromJson(fetch);
+      return LanguageSupport.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<LanguageSupportType?> languageSupportTypes(
+  Future<Count?> languageSupportCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.languageSupports;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> languageSupportJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.languageSupports;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> languageSupportCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.languageSupports;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<LanguageSupportType?> languageSupportTypeProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.languageSupportTypes;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return LanguageSupportType.fromJson(fetch);
+      return LanguageSupportType.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Language?> languages(IGDBRequestParameters params) async {
+  Future<Count?> languageSupportTypeCountProto(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.languageSupportTypes;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> languageSupportTypeJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.languageSupportTypes;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> languageSupportTypeCountJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.languageSupportTypes;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Language?> languageProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.languages;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Language.fromJson(fetch);
+      return Language.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<MultiplayerMode?> multiplayerModes(
+  Future<Count?> languageCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.languages;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> languageJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.languages;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> languageCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.languages;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<MultiplayerMode?> multiplayerModeProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.multiplayerModes;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return MultiplayerMode.fromJson(fetch);
+      return MultiplayerMode.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Platform?> platforms(IGDBRequestParameters params) async {
+  Future<Count?> multiplayerModeCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.multiplayerModes;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> multiplayerModeJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.multiplayerModes;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> multiplayerModeCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.multiplayerModes;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Platform?> platformProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.platforms;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Platform.fromJson(fetch);
+      return Platform.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<PlatformFamily?> platformFamilies(
+  Future<Count?> platformCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platforms;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> platformJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platforms;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> platformCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platforms;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<PlatformFamily?> platformFamilyProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.platformFamilies;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return PlatformFamily.fromJson(fetch);
+      return PlatformFamily.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<PlatformLogo?> platformLogos(IGDBRequestParameters params) async {
+  Future<Count?> platformFamilyCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platformFamilies;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> platformFamilyJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platformFamilies;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> platformFamilyCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platformFamilies;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<PlatformLogo?> platformLogoProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.platformLogos;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return PlatformLogo.fromJson(fetch);
+      return PlatformLogo.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<PlatformVersion?> platformVersions(
+  Future<Count?> platformLogoCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platformLogos;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> platformLogoJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platformLogos;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> platformLogoCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platformLogos;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<PlatformVersion?> platformVersionProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.platformVersions;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return PlatformVersion.fromJson(fetch);
+      return PlatformVersion.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<PlatformVersionCompany?> platformVersionCompanies(
+  Future<Count?> platformVersionCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platformVersions;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> platformVersionJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platformVersions;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> platformVersionCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platformVersions;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<PlatformVersionCompany?> platformVersionCompanyProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.platformVersionCompanies;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return PlatformVersionCompany.fromJson(fetch);
+      return PlatformVersionCompany.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<PlatformVersionReleaseDate?> platformVersionReleaseDates(
+  Future<Count?> platformVersionCompanyCountProto(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.platformVersionCompanies;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> platformVersionCompanyJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.platformVersionCompanies;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> platformVersionCompanyCountJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.platformVersionCompanies;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<PlatformVersionReleaseDate?> platformVersionReleaseDateProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.platformVersionReleaseDates;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return PlatformVersionReleaseDate.fromJson(fetch);
+      return PlatformVersionReleaseDate.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<PlatformWebsite?> platformWebsites(
+  Future<Count?> platformVersionReleaseDateCountProto(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.platformVersionReleaseDates;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> platformVersionReleaseDateJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.platformVersionReleaseDates;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> platformVersionReleaseDateCountJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.platformVersionReleaseDates;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<PlatformWebsite?> platformWebsiteProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.platformWebsites;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return PlatformWebsite.fromJson(fetch);
+      return PlatformWebsite.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<PlayerPerspective?> playerPerspectives(
+  Future<Count?> platformWebsiteCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platformWebsites;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> platformWebsiteJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platformWebsites;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> platformWebsiteCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.platformWebsites;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<PlayerPerspective?> playerPerspectiveProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.playerPerspectives;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return PlayerPerspective.fromJson(fetch);
+      return PlayerPerspective.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Region?> regions(IGDBRequestParameters params) async {
+  Future<Count?> playerPerspectiveCountProto(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.playerPerspectives;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> playerPerspectiveJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.playerPerspectives;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> playerPerspectiveCountJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.playerPerspectives;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Region?> regionProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.regions;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Region.fromJson(fetch);
+      return Region.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<ReleaseDate?> releaseDates(IGDBRequestParameters params) async {
+  Future<Count?> regionCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.regions;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> regionJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.regions;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> regionCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.regions;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<ReleaseDate?> releaseDateProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.releaseDates;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return ReleaseDate.fromJson(fetch);
+      return ReleaseDate.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<ReleaseDateStatus?> releaseDateStatuses(
+  Future<Count?> releaseDateCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.releaseDates;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> releaseDateJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.releaseDates;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> releaseDateCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.releaseDates;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<ReleaseDateStatus?> releaseDateStatusProto(
     IGDBRequestParameters params,
   ) async {
     const endpoint = IGDBEndpoints.releaseDateStatuses;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return ReleaseDateStatus.fromJson(fetch);
+      return ReleaseDateStatus.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Screenshot?> screenshots(IGDBRequestParameters params) async {
+  Future<Count?> releaseDateStatusCountProto(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.releaseDateStatuses;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> releaseDateStatusJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.releaseDateStatuses;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> releaseDateStatusCountJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.releaseDateStatuses;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Screenshot?> screenshotProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.screenshots;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Screenshot.fromJson(fetch);
+      return Screenshot.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Search?> search(IGDBRequestParameters params) async {
+  Future<Count?> screenshotCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.screenshots;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> screenshotJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.screenshots;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> screenshotCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.screenshots;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Search?> searchProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.search;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Search.fromJson(fetch);
+      return Search.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Website?> websites(IGDBRequestParameters params) async {
+  Future<Count?> searchCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.search;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> searchJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.search;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> searchCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.search;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Website?> websiteProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.websites;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Website.fromJson(fetch);
+      return Website.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<Theme?> themes(IGDBRequestParameters params) async {
+  Future<Count?> websiteCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.websites;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> websiteJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.websites;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> websiteCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.websites;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<Theme?> themeProto(IGDBRequestParameters params) async {
     const endpoint = IGDBEndpoints.themes;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return Theme.fromJson(fetch);
+      return Theme.fromBuffer(fetch);
     } else {
       return null;
     }
   }
 
-  Future<MultiQueryResult?> multiquery(IGDBRequestParameters params) async {
-    const endpoint = IGDBEndpoints.multiquery;
-    final fetch = await _makeRequestByEndpoint(endpoint, params);
+  Future<Count?> themeCountProto(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.themes;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
     if (fetch != null) {
-      return MultiQueryResult.fromJson(fetch);
+      return Count.fromBuffer(fetch);
     } else {
       return null;
     }
+  }
+
+  Future<dynamic> themeJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.themes;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> themeCountJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.themes;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<MultiQueryResult?> multiQueryResultProto(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.multiquery;
+    final fetch = await _makeProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return MultiQueryResult.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<Count?> multiQueryResultCountProto(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.multiquery;
+    final fetch = await _makeCountProtoRequestByEndpoint(endpoint, params);
+    if (fetch != null) {
+      return Count.fromBuffer(fetch);
+    } else {
+      return null;
+    }
+  }
+
+  Future<dynamic> multiQueryResultJson(IGDBRequestParameters params) async {
+    const endpoint = IGDBEndpoints.multiquery;
+    final fetch = await _makeJsonRequestByEndpoint(endpoint, params);
+    return fetch;
+  }
+
+  Future<dynamic> multiQueryResultCountJson(
+    IGDBRequestParameters params,
+  ) async {
+    const endpoint = IGDBEndpoints.multiquery;
+    final fetch = await _makeCountJsonRequestByEndpoint(endpoint, params);
+    return fetch;
   }
 }

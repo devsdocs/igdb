@@ -11,7 +11,8 @@ environment:
 dependencies:
   dio: ^5.3.2
   igdb_dart_protobuff: ^1.0.1
-  reusable_tools: ^1.0.10
+  protobuf: ^3.1.0
+  reusable_tools: ^1.0.11
   # path: ^1.8.0
 
 dev_dependencies:
