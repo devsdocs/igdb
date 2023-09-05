@@ -51,6 +51,7 @@ enum IGDBEndpoints {
 
   const IGDBEndpoints._private(this.value);
   final String value;
+
   @override
   String toString() => value;
 }
