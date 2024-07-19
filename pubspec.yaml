@@ -7,9 +7,8 @@ environment:
   sdk: ^3.1.0
 
 dependencies:
-  dio: ^5.3.2
-  igdb_dart_protobuff: ^1.0.1
-  reusable_tools: ^1.0.11
+  dio: ^5.5.0+1
+  igdb_dart_protobuff: ^1.0.2
 
 dev_dependencies:
   html: ^0.15.4

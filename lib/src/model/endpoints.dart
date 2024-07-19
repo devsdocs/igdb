@@ -46,10 +46,20 @@ enum IGDBEndpoints {
   search._private('search'),
   websites._private('websites'),
   themes._private('themes'),
-  multiquery._private('multiquery'),
   ;
 
   const IGDBEndpoints._private(this.value);
+  final String value;
+
+  @override
+  String toString() => value;
+}
+
+enum IGDBMultiQueryEndpoint {
+  multiquery._private('multiquery'),
+  ;
+
+  const IGDBMultiQueryEndpoint._private(this.value);
   final String value;
 
   @override
